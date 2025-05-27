@@ -21,7 +21,7 @@ import requests
 import base64
 
 # Main page
-st.set_page_config(layout="wide")
+st.set_page_config(layout="wide", page_title="Richelin")
 
 # Function to convert image to base64
 def get_base64_image(image_path):
@@ -101,12 +101,12 @@ def load_restaurant_data(restaurant_name):
 data = load_main_page_data()
 available_restaurants = get_available_restaurants()
 
-# Sidebar info
-if not data.empty:
-    if len(available_restaurants) > 0:
-        st.sidebar.success(f"✓ Main data loaded\n✓ Connected to HuggingFace\n📊 {len(available_restaurants)} restaurants available")
-    else:
-        st.sidebar.warning("⚠️ Could not connect to HuggingFace dataset")
+# # Sidebar info
+# if not data.empty:
+#     if len(available_restaurants) > 0:
+#         st.sidebar.success(f"✓ Main data loaded\n✓ Connected to HuggingFace\n📊 {len(available_restaurants)} restaurants available")
+#     else:
+#         st.sidebar.warning("⚠️ Could not connect to HuggingFace dataset")
 
 item_quality_columns = [
     'positive_Item Quality', 'neutral_Item Quality', 'negative_Item Quality'
