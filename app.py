@@ -13,15 +13,253 @@ import Levenshtein
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from collections import defaultdict
-import streamlit_nested_layout
 import re
 from streamlit_extras.stylable_container import stylable_container
 from huggingface_hub import hf_hub_download, list_repo_files
 import requests
 import base64
+from st_screen_stats import ScreenData
 
 # Main page
 st.set_page_config(layout="wide", page_title="Richelin")
+
+# Initialize screen data
+screen_data = ScreenData()
+screen_stats = screen_data.st_screen_data()
+screen_width = screen_stats.get("innerWidth", 0) if screen_stats else 0
+
+# Calculate scale factor
+DESIGN_WIDTH = 1080  # Base design width
+MIN_WIDTH = 320  # Minimum supported width
+scale_factor = 1.0
+
+if screen_width > 0:
+    # Calculate scale factor with minimum threshold
+    scale_factor = max(screen_width / DESIGN_WIDTH, MIN_WIDTH / DESIGN_WIDTH)
+    # Cap maximum scale at 1.0 to prevent upscaling on large screens
+    scale_factor = min(scale_factor, 1.0)
+
+# Apply responsive scaling CSS with CSS Custom Properties (FIXED VERSION)
+st.markdown(f"""
+<style>
+    /* Define CSS custom properties for scaling */
+    :root {{
+        --scale-factor: {scale_factor};
+        --base-font-size: 2rem;
+        --header-font-size: 3.5rem;
+        --subheader-font-size: 3rem;
+        --small-header-font-size: 2.75rem;
+    }}
+    
+    /* Override Streamlit's mobile breakpoints */
+    @media (max-width: 9999px) {{
+        /* Force all columns to maintain their layout */
+        [data-testid="column"] {{
+            flex: 1 1 0% !important;
+            width: auto !important;
+            min-width: 0 !important;
+        }}
+        
+        /* Prevent column stacking */
+        [data-testid="column"]:nth-child(n) {{
+            flex: 1 1 0% !important;
+            width: auto !important;
+        }}
+        
+        /* Override Streamlit's responsive grid */
+        .row-widget.stHorizontalBlock {{
+            flex-wrap: nowrap !important;
+            gap: 0.5rem !important;
+        }}
+        
+        /* Ensure columns stay horizontal */
+        .stColumns {{
+            flex-direction: row !important;
+        }}
+    }}
+    
+    /* Apply uniform scaling to the entire app */
+    .stApp > div > div {{
+        transform: scale(var(--scale-factor));
+        transform-origin: top left;
+        width: calc(100% / var(--scale-factor));
+        overflow-x: hidden;
+    }}
+    
+    /* Scale specific elements */
+    .stApp {{
+        overflow-x: hidden;
+        max-width: 100vw;
+    }}
+    
+    /* FIXED: Use CSS custom properties instead of !important for font sizes */
+    * {{
+        font-size: calc(var(--base-font-size) * var(--scale-factor));
+    }}
+    
+    /* Now these headers can be properly overridden */
+    h1 {{
+        font-size: calc(var(--header-font-size) * var(--scale-factor));
+    }}
+    
+    h2 {{
+        font-size: calc(var(--subheader-font-size) * var(--scale-factor));
+    }}
+    
+    h3 {{
+        font-size: calc(var(--small-header-font-size) * var(--scale-factor));
+    }}
+    
+    /* Scale metrics */
+    [data-testid="metric-container"] {{
+        transform: scale(var(--scale-factor));
+        transform-origin: top left;
+    }}
+    
+    /* Scale map container */
+    .stDeckGlJsonChart {{
+        transform: scale(var(--scale-factor));
+        transform-origin: top left;
+        width: calc(100% / var(--scale-factor)) !important;
+    }}
+    
+    /* Scale matplotlib figures */
+    .stImage, .stPlotlyChart {{
+        transform: scale(var(--scale-factor));
+        transform-origin: top left;
+    }}
+    
+    /* Prevent horizontal scrolling */
+    html, body {{
+        overflow-x: hidden !important;
+        max-width: 100vw !important;
+    }}
+    
+    /* Scale search container background */
+    .stContainer > div {{
+        background-size: cover !important;
+    }}
+    
+    /* Ensure nested layouts maintain structure */
+    [data-testid="stHorizontalBlock"] {{
+        flex-wrap: nowrap !important;
+        min-width: 0 !important;
+    }}
+    
+    /* Force columns to stay in row */
+    @media screen and (max-width: 640px) {{
+        [data-testid="column"] {{
+            flex: 1 1 0% !important;
+            max-width: none !important;
+        }}
+        
+        .row-widget.stHorizontalBlock {{
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+        }}
+    }}
+    
+    /* Additional overrides for very small screens */
+    @media screen and (max-width: 480px) {{
+        /* Maintain multi-column layouts */
+        [data-testid="stHorizontalBlock"] > [data-testid="column"] {{
+            flex: 1 !important;
+            min-width: 0 !important;
+            max-width: none !important;
+        }}
+        
+        /* Scale padding and margins */
+        .stApp > div > div {{
+            padding: calc(1rem * var(--scale-factor)) !important;
+        }}
+        
+        [data-testid="stVerticalBlock"] > div {{
+            gap: calc(1rem * var(--scale-factor)) !important;
+        }}
+    }}
+    
+    /* Debug info styling */
+    .debug-info {{
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        background: rgba(0,0,0,0.8);
+        color: white;
+        padding: 10px;
+        border-radius: 5px;
+        font-size: 12px !important;
+        z-index: 9999;
+    }}
+    
+    /* Fix for search container - prevent expansion */
+    .search-container {{
+        height: 600px !important;
+        overflow: visible !important;
+        position: relative;
+    }}
+    
+    /* Ensure dropdown appears outside container */
+    .stSearchbox {{
+        position: relative;
+        z-index: 1000;
+    }}
+    
+    /* Make dropdown position absolute to prevent container expansion */
+    .stSearchbox > div > div:last-child {{
+        position: absolute !important;
+        top: 100% !important;
+        left: 0 !important;
+        right: 0 !important;
+        z-index: 1001 !important;
+    }}
+    
+    /* FIXED: Custom header styling that now works properly */
+    .custom-header {{
+        color: white !important;
+        font-size: calc(3rem * var(--scale-factor)) !important;
+        font-weight: 700 !important;
+        line-height: 1.2 !important;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.5) !important;
+        margin-bottom: 1rem !important;
+    }}
+    
+    /* Responsive custom header for smaller screens */
+    @media screen and (max-width: 768px) {{
+        .custom-header {{
+            font-size: calc(2rem * var(--scale-factor)) !important;
+        }}
+    }}
+    
+    @media screen and (max-width: 480px) {{
+        .custom-header {{
+            font-size: calc(1.5rem * var(--scale-factor)) !important;
+        }}
+    }}
+    
+    /* Enhanced search section styling */
+    .search-section {{
+        position: relative;
+        z-index: 1;
+    }}
+    
+    /* Make sure markdown containers respect custom styling */
+    [data-testid="stMarkdownContainer"] .custom-header {{
+        color: white !important;
+        font-size: calc(3rem * var(--scale-factor)) !important;
+    }}
+</style>
+""", unsafe_allow_html=True)
+
+# # Debug information (remove in production)
+# if st.sidebar.checkbox("Show Debug Info", value=False):
+#     st.markdown(f"""
+#     <div class="debug-info">
+#         Screen Width: {screen_width}px<br>
+#         Scale Factor: {scale_factor:.2f}<br>
+#         Effective Width: {screen_width/scale_factor:.0f}px
+#     </div>
+#     """, unsafe_allow_html=True)
 
 # Function to convert image to base64
 def get_base64_image(image_path):
@@ -101,13 +339,6 @@ def load_restaurant_data(restaurant_name):
 data = load_main_page_data()
 available_restaurants = get_available_restaurants()
 
-# # Sidebar info
-# if not data.empty:
-#     if len(available_restaurants) > 0:
-#         st.sidebar.success(f"✓ Main data loaded\n✓ Connected to HuggingFace\n📊 {len(available_restaurants)} restaurants available")
-#     else:
-#         st.sidebar.warning("⚠️ Could not connect to HuggingFace dataset")
-
 item_quality_columns = [
     'positive_Item Quality', 'neutral_Item Quality', 'negative_Item Quality'
 ]
@@ -125,17 +356,14 @@ other_sentiment_columns = [
     'positive_Special Features', 'neutral_Special Features', 'negative_Special Features'
 ]
 
-
-
 st.markdown("<div class='search-section'>", unsafe_allow_html=True)
-
-
 
 # Implementing the autocomplete search bar using streamlit-searchbox
 def search_restaurants(query):
     results = data[data['name'].str.contains(query, case=False, na=False)]
     return results['name'].tolist()
 
+# Wrap the search container in a fixed-height div
 with stylable_container(key="test",
                         css_styles=f"""
                         {{
@@ -143,46 +371,59 @@ with stylable_container(key="test",
         background-size: cover;
         background-repeat: no-repeat;
         background-position: center;
-        padding-top: 150px; /* Adjust padding as needed */
-        padding-right: 100px; /* Adjust padding as needed */
-        padding-bottom: 0px; /* Adjust padding as needed */
-        padding-left: 50px; /* Adjust padding as needed */
+        padding-top: 150px;
+        padding-right: 100px;
+        padding-bottom: 0px;
+        padding-left: 50px;
+        height: 600px !important;
+        min-height: 600px !important;
+        max-height: 600px !important;
+        overflow: visible !important;
+        position: relative;
         }}
     """):
+    # Use regular columns
     cc1, cc2 = st.columns([5, 8])
     with cc1:
         sb_text = "Discover restaurant on OpenRice with Data Analysis"
+        # FIXED: Now the custom header font size will work properly
         st.markdown(
             f"""
-            <style>
-            .custom-header {{
-                color: white !important; /* Force white text color */
-                padding: 10px;
-                border-radius: 5px;
-                padding-bottom: 50px;
-            }}
-            /* Override any theme colors */
-            [data-testid="stMarkdown"] .custom-header {{
-                color: white !important;
-            }}
-            </style>
-            <h1 class="custom-header">{sb_text}</h1>
+            <div class="custom-header">{sb_text}</div>
             """,
             unsafe_allow_html=True
         )
-        with stylable_container(key="test2",
-                                css_styles="""
-                                {
-            width: 100%;
-            min-height: 400px;
+        # Create a container div that won't expand
+        st.markdown("""
+        <style>
+            /* Ensure the searchbox container doesn't affect parent height */
+            .search-wrapper {
+                position: relative;
+                height: 60px;
+                overflow: visible !important;
             }
-        """):
+            
+            /* Make dropdown overlay instead of pushing content */
+            .stSearchbox {
+                position: relative;
+            }
+            
+            /* Style dropdown to appear outside container flow */
+            div[data-baseweb="popover"] {
+                position: fixed !important;
+                z-index: 10000 !important;
+            }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Wrap searchbox in a container
+        search_container = st.container()
+        with search_container:
             selected_restaurant = st_searchbox(
                 search_function=search_restaurants,
                 placeholder="Search for restaurant",
                 key="restaurant_searchbox"
-
-        )
+            )
 
 def is_standard_date_format(date_str):
     try:
@@ -191,11 +432,8 @@ def is_standard_date_format(date_str):
     except:
         return False
 
-
-
 if selected_restaurant:
     st.session_state.selected_restaurant = selected_restaurant
-    # st.rerun()
 
 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -217,17 +455,12 @@ if 'selected_restaurant' in st.session_state:
     
     # Filter out non-standard date formats
     standard_dates = restaurant_df[restaurant_df['review_posted_date'].apply(is_standard_date_format)]
-
-    # Convert the filtered dates to pd.Timestamp
     standard_dates['review_posted_date'] = pd.to_datetime(standard_dates['review_posted_date'], format='%Y-%m-%d', errors='coerce')
-
-    # Get the latest date
     latest_date = standard_dates['review_posted_date'].max()
     st.markdown("<br><br>", unsafe_allow_html=True)
     
+    # Restaurant info columns
     mcol1, mcol2 = st.columns(2)
-    
-    
     
     with mcol1:
         st.header(restaurant['name'])
@@ -240,14 +473,16 @@ if 'selected_restaurant' in st.session_state:
         st.subheader(f"Cuisine Type: {cleaned_ct}")
         st.markdown("<br>", unsafe_allow_html=True)
         st.subheader(f"Last update: {latest_date}")
-        
     
     with mcol2:
         st.map(pd.DataFrame([[restaurant['latitude'], restaurant['longitude']]], columns=['latitude', 'longitude']))
     
     st.subheader("Overall Ratings")
     st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Force 5-column layout for ratings
     rcol1, rcol2, rcol3, rcol4, rcol5 = st.columns(5)
+    
     rcol1.metric("Taste", f"{restaurant_df['味道'].mean():.3g}", delta=None)
     rcol1.write(f"By {restaurant_df['味道'].count()} reviewers")
     rcol2.metric("Ambience", f"{restaurant_df['環境'].mean():.3g}", delta=None)
@@ -260,30 +495,51 @@ if 'selected_restaurant' in st.session_state:
     rcol5.write(f"By {restaurant_df['抵食'].count()} reviewers")
     st.markdown("<br><br>", unsafe_allow_html=True)
 
-    # Openrice Ratings
+    # Process data for word clouds
     for col in item_quality_columns + other_sentiment_columns:
         restaurant_df[f'{col}_adjectives'] = restaurant_df[f'{col}_adjectives'].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
         restaurant_df[f'{col}_parsed'] = restaurant_df[f'{col}_parsed'].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
         
     st.header("Review Highlights")
+    
     def generate_wordcloud(frequencies, title):
-        wordcloud = WordCloud(font_path='Arial_Unicode_MS.ttf', width=800, height=400, background_color='white').generate_from_frequencies(frequencies)
-        plt.figure(figsize=(10, 5))
-        plt.title(title)
+        # Adjust figure size based on scale factor
+        fig_width = max(10 * scale_factor, 5)
+        fig_height = max(5 * scale_factor, 2.5)
+        
+        wordcloud = WordCloud(
+            font_path='Arial_Unicode_MS.ttf', 
+            width=int(800 * scale_factor), 
+            height=int(400 * scale_factor), 
+            background_color='white'
+        ).generate_from_frequencies(frequencies)
+        
+        plt.figure(figsize=(fig_width, fig_height))
+        plt.title(title, fontsize=50 * scale_factor)
         plt.imshow(wordcloud, interpolation='bilinear')
         plt.axis('off')
         st.pyplot(plt)
         plt.close()
 
     def generate_wordcloud_2(frequencies, title):
-        wordcloud = WordCloud(font_path='Arial_Unicode_MS.ttf', width=800, height=400, background_color='white').generate(frequencies)
-        plt.figure(figsize=(10, 5))
-        plt.title(title)
+        fig_width = max(10 * scale_factor, 5)
+        fig_height = max(5 * scale_factor, 2.5)
+        
+        wordcloud = WordCloud(
+            font_path='Arial_Unicode_MS.ttf', 
+            width=int(800 * scale_factor), 
+            height=int(400 * scale_factor), 
+            background_color='white'
+        ).generate(frequencies)
+        
+        plt.figure(figsize=(fig_width, fig_height))
+        plt.title(title, fontsize=50 * scale_factor)
         plt.imshow(wordcloud, interpolation='bilinear')
         plt.axis('off')
         st.pyplot(plt)
         plt.close()
 
+    # Word clouds with forced 3-column layout
     for sentiment in ['positive', 'neutral', 'negative']:
         st.markdown("<br><br>", unsafe_allow_html=True)
         st.subheader(f'Word Clouds for {sentiment.capitalize()} Sentiment')
@@ -313,15 +569,13 @@ if 'selected_restaurant' in st.session_state:
         flat_list = [item for sublist in adjectives_list for item in sublist]
         return ' '.join(flat_list)
 
-
-
-
+    # Process restaurant data
     restaurant_df['recommended_dishes'] = restaurant_df['recommended_dishes'].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
 
     def tokenize(text):
         return ' '.join(jieba.cut(text))
 
-    # Step 1: Extract all unique keys from the dictionaries
+    # Extract all unique keys from the dictionaries
     all_keys = []
     for column in ['recommended_dishes', ]:
         for klist in restaurant_df[column]:
@@ -333,22 +587,20 @@ if 'selected_restaurant' in st.session_state:
     for column in ['positive_Item Quality_parsed', 'neutral_Item Quality_parsed', 'negative_Item Quality_parsed']:
         for kdict in restaurant_df[column]:
             if isinstance(kdict, list):
-                # print(kdict)
                 for ld in kdict:
                     if isinstance(ld, dict):
                         for key in list(ld.keys()):
                             all_keys.append(key)
 
     all_keys = set(all_keys)
-    # Tokenize the keys
     tokenized_keys = [tokenize(key) for key in all_keys]
 
-    # Step 2: Compute text similarity between keys to group them
+    # Compute text similarity between keys to group them
     vectorizer = TfidfVectorizer().fit_transform(tokenized_keys)
     similarity_matrix = cosine_similarity(vectorizer)
 
-    # Step 3: Create a mapping of keys based on high similarity
-    threshold = 0.4  # Adjust the threshold as needed
+    # Create a mapping of keys based on high similarity
+    threshold = 0.4
     key_map = defaultdict(set)
 
     keys_list = list(all_keys)
@@ -365,7 +617,7 @@ if 'selected_restaurant' in st.session_state:
     for key in keys_list:
         if key not in visited:
             similar_group = set(key_map[key])
-            similar_group.add(key)  # Add the key itself to the group
+            similar_group.add(key)
             for similar_key in similar_group:
                 visited.add(similar_key)
             grouped_keys.append(similar_group)
@@ -409,17 +661,14 @@ if 'selected_restaurant' in st.session_state:
                 if filtered_group:
                     filtered_groups.append(filtered_group)
             
-            # Check for convergence: if filtered groups are the same as previous iteration
             if filtered_groups == merged_keys:
                 break
             
-            # Update merged_keys with filtered groups for next iteration
             merged_keys = filtered_groups
         
         return merged_keys
 
     filtered_groups = filter_groups(merged_keys, vectorizer)
-
     filtered_groups = merge_groups(filtered_groups, merge_threshold=0.7)       
 
     restaurant_df['image_data'] = restaurant_df['image_data'].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
@@ -440,14 +689,11 @@ if 'selected_restaurant' in st.session_state:
                 return group
         return None
 
-
-
     results = []
 
     for group in filtered_groups:
         if len(group) <= 3:
             continue
-        # print(f"group: {group}")
         group_dict = {
             'group': ', '.join(group),
             'appears_in_recommended': any(key in restaurant_df['recommended_dishes'].explode().values for key in group),
@@ -471,22 +717,18 @@ if 'selected_restaurant' in st.session_state:
                 group_dict['frequency'] += 1
 
             for quality in ['positive_Item Quality_parsed', 'neutral_Item Quality_parsed', 'negative_Item Quality_parsed']:
-                if row[quality]:  # Ensure the column is not empty
-                    quality_dict_list = row[quality]  # Accessing the dictionary in the list
+                if row[quality]:
+                    quality_dict_list = row[quality]
                     if isinstance(quality_dict_list, list):
                         for quality_dict in quality_dict_list:
                             if isinstance(quality_dict, dict):
-                                # print(quality_dict)
                                 for key in quality_dict.keys():
                                     if len(quality_dict[key]) <= 0:
                                         continue
                                     key_group = find_group(key, filtered_groups)
-                                    # print(key_group)
                                     if key_group:
                                         if key_group == group:
                                             sentiment = quality.split('_')[0]
-                                    #         print(quality_dict[key])
-                                            # adjective_entry = {'adjective': quality_dict[key], 'row_index': idx}
                                             if sentiment == 'positive':
                                                 group_dict['positive_adjectives'].append(quality_dict[key])
                                             elif sentiment == 'neutral':
@@ -501,6 +743,7 @@ if 'selected_restaurant' in st.session_state:
     result_df['positive_adjectives_flat'] = result_df['positive_adjectives'].apply(flatten_and_join)
     result_df['neutral_adjectives_flat'] = result_df['neutral_adjectives'].apply(flatten_and_join)
     result_df['negative_adjectives_flat'] = result_df['negative_adjectives'].apply(flatten_and_join)
+    
     st.header("Food Items Highlight")
     for index, row in result_df.iterrows():
         text1 = row['positive_adjectives_flat']
@@ -508,15 +751,17 @@ if 'selected_restaurant' in st.session_state:
         text3 = row['negative_adjectives_flat']
         if len(text1) > 0 or len(text2) > 0 or len(text3) > 0:
             with st.expander(row['group'].split(',')[0]):
-                # Display images in rows of 5 columns
+                # Display images in rows of 5 columns with forced layout
                 images = row['images'][:20]
                 num_images = len(images)
                 cols = st.columns(5)
                 for i in range(num_images):
                     with cols[i % 5]:
                         st.image(images[i])
+                
+                # Display word clouds with forced 3-column layout
                 wccols = st.columns(3)
-                # Display word clouds
+                
                 with wccols[0]:
                     if len(text1) > 0:
                         generate_wordcloud_2(text1, "Positive Adjectives")
@@ -532,16 +777,3 @@ if 'selected_restaurant' in st.session_state:
                         generate_wordcloud_2(text3, "Negative Adjectives")
                     else:
                         st.write("No data for Negative Adjectives")
-
-
-
-
-    # Placeholder for further sections (Review Highlights, Signature Dishes, Polarized Reviews)
-    
-    # st.write("Wordclouds here")
-
-    # st.subheader("Signature Dishes")
-    # st.write("Dish details here")
-
-    # st.subheader("Polarized Reviews")
-    # st.write("Review details here")
